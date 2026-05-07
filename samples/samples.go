@@ -17,7 +17,8 @@ import (
 
 	commonerrors "github.com/gardener/scaling-advisor/api/common/errors"
 	commontypes "github.com/gardener/scaling-advisor/api/common/types"
-	"github.com/gardener/scaling-advisor/api/planner"
+	sacorev1alpha1 "github.com/gardener/scaling-advisor/api/core/v1alpha1"
+	plannerapi "github.com/gardener/scaling-advisor/api/planner"
 	"github.com/gardener/scaling-advisor/common/ioutil"
 	"github.com/gardener/scaling-advisor/common/objutil"
 	corev1 "k8s.io/api/core/v1"
@@ -54,8 +55,8 @@ func GenScalingConstraints(in ConstraintGenInput) (out ConstraintGenOutput, err 
 }
 
 // IncreaseUnscheduledWorkLoad replicates each unscheduled pod by delta inside the given cluster snapshot
-func IncreaseUnscheduledWorkLoad(snapshot *planner.ClusterSnapshot, amount int) error {
-	var extra []planner.PodInfo
+func IncreaseUnscheduledWorkLoad(snapshot *plannerapi.ClusterSnapshot, amount int) error {
+	var extra []plannerapi.PodInfo
 	for _, upod := range snapshot.GetUnscheduledPods() {
 		lastCharOfName := upod.Name[len(upod.Name)-1:]
 		endsWithDigit := strings.ContainsAny(lastCharOfName, "0123456789")
@@ -347,6 +348,11 @@ func GetCSIDefaults(provider commontypes.CloudProvider) (defaults CSIDefaults, e
 	return
 }
 
+// GetStorageMetaAccess returns a sample StorageMetaAccess implementation for the given provider meant for tests purposes
+func GetStorageMetaAccess(provider commontypes.CloudProvider) plannerapi.StorageMetaAccess {
+	return &testStorageMetaAccess{provider: provider}
+}
+
 func fillPodTemplateDataDefaults(podTmplData PodTemplateData) PodTemplateData {
 	podTmplData.AppLabels = fillAppLabelDefaults(podTmplData.AppLabels)
 	if podTmplData.Namespace == "" {
@@ -404,4 +410,24 @@ var (
 		"m5.large":   26,
 		"c3.8xlarge": 38,
 	}
+	_ plannerapi.StorageMetaAccess = (*testStorageMetaAccess)(nil)
 )
+
+type testStorageMetaAccess struct {
+	provider commontypes.CloudProvider
+}
+
+func (s *testStorageMetaAccess) GetFallbackCSINodeSpec(instanceType string) (csiNodeSpec storagev1.CSINodeSpec, err error) {
+	maxVolumes := GetMaxAllocatableVolumes(s.provider, instanceType)
+	csiNodeSpec.Drivers, err = GetCSINodeDrivers(s.provider, maxVolumes)
+	return
+}
+
+// getAllNodePlacements computes all the possible NodePlacements for the ScalingConstraintSpec.
+func getAllNodePlacements(c sacorev1alpha1.ScalingConstraintSpec) (placements []sacorev1alpha1.NodePlacement) {
+	placements = make([]sacorev1alpha1.NodePlacement, 0, len(c.NodePools)*len(c.GetAllAvailabilityZones()))
+	for _, p := range c.NodePools {
+		placements = append(placements, p.GetNodePlacements()...)
+	}
+	return placements
+}

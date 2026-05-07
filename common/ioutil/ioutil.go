@@ -74,6 +74,7 @@ func GetTempDir() string {
 // MakeTempSubDir creates a sub dir under the temp directory and returns the path
 func MakeTempSubDir(name string) (subDir string, err error) {
 	subDir = path.Join(GetTempDir(), name)
+	_ = os.RemoveAll(subDir)
 	if err = os.MkdirAll(subDir, 0700); err != nil {
 		err = fmt.Errorf("failed to create subdir %q: %w", subDir, err)
 	}

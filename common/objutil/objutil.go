@@ -160,6 +160,22 @@ func SubtractResources(a, b corev1.ResourceList) {
 	}
 }
 
+// HasSufficientResources returns true if the allocatable resources are sufficient to satisfy the requested resources.
+// This function performs a static capacity check and does not account for resources already consumed by other
+// workloads.
+func HasSufficientResources(allocatableResources, requestedResources corev1.ResourceList) bool {
+	for name, qty := range requestedResources {
+		alloc, ok := allocatableResources[name]
+		if !ok {
+			return false
+		}
+		if alloc.Cmp(qty) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // PatchObject directly patches the given runtime object with the given patchBytes and using the given patch type.
 // TODO: Add unit test for this specific objutil method.
 func PatchObject(objPtr runtime.Object, name cache.ObjectName, patchType types.PatchType, patchBytes []byte) error {

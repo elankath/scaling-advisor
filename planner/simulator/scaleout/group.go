@@ -6,6 +6,7 @@ package scaleout
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -64,7 +65,11 @@ func (g *simGroup) Run(ctx context.Context, getViewFn minkapi.GetViewFunc) (runR
 			if err != nil {
 				return err
 			}
-			return sim.Run(groupCtx, view)
+			simErr := sim.Run(groupCtx, view)
+			if errors.Is(simErr, plannerapi.ErrNoUnscheduledPods) {
+				return nil
+			}
+			return simErr
 		})
 	}
 	err = eg.Wait()
@@ -76,6 +81,10 @@ func (g *simGroup) Run(ctx context.Context, getViewFn minkapi.GetViewFunc) (runR
 	for _, sim := range g.simulations {
 		simResult, err = sim.Result()
 		if err != nil {
+			if errors.Is(err, plannerapi.ErrNoUnscheduledPods) {
+				err = nil // if simulation failed because there were no unscheduled pods for the sim run, ignore error.
+				continue
+			}
 			return
 		}
 		runResults = append(runResults, simResult)

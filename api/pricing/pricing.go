@@ -1,7 +1,10 @@
 // Package pricing provides domain types and facades for cloud provider instance details and their pricing.
 package pricing
 
-import commontypes "github.com/gardener/scaling-advisor/api/common/types"
+import (
+	commontypes "github.com/gardener/scaling-advisor/api/common/types"
+	"k8s.io/apimachinery/pkg/util/sets"
+)
 
 // InstancePriceInfo contains pricing and specification information for a cloud instance type.
 type InstancePriceInfo struct {
@@ -36,6 +39,7 @@ type InstancePricingAccess interface {
 	// GetInfo gets the InstancePriceInfo (whicn includes price) for the given region and instance type.
 	// TODO: should we also pass OS name here ? if so, we need to need to change ScalingConstraint.
 	GetInfo(region, instanceTypeName string) (InstancePriceInfo, error)
+	sets.Set[]
 }
 
 // GetProviderInstancePricingAccessFunc is a factory function for creating InstancePricingAccess implementations.

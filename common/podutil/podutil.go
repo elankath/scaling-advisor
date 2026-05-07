@@ -5,14 +5,11 @@
 package podutil
 
 import (
-	"slices"
-
 	"github.com/gardener/scaling-advisor/common/objutil"
 
 	commontypes "github.com/gardener/scaling-advisor/api/common/types"
 	"github.com/gardener/scaling-advisor/api/planner"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 )
@@ -131,16 +128,38 @@ func PodResourceInfoFromCoreV1Pod(p *corev1.Pod) planner.PodResourceInfo {
 	}
 }
 
-// AggregatePodRequests computes the sum of resource requirements
-// for all the init containers and containers present in a pod.
-func AggregatePodRequests(p *corev1.Pod) map[corev1.ResourceName]resource.Quantity {
-	aggregate := map[corev1.ResourceName]resource.Quantity{}
-	containers := slices.AppendSeq(p.Spec.InitContainers, slices.Values(p.Spec.Containers))
-	for _, c := range containers {
-		for k, v := range c.Resources.Requests {
-			current := aggregate[k]
-			current.Add(v)
-			aggregate[k] = current
+// AggregatePodRequests computes the total resource requests for a Pod.
+//
+// It sums requests across all regular containers, takes the maximum request per resource across init containers, and
+// adds Pod overhead if specified.
+func AggregatePodRequests(p *corev1.Pod) corev1.ResourceList {
+	aggregate := corev1.ResourceList{}
+
+	// Sum regular containers
+	for _, c := range p.Spec.Containers {
+		for name, qty := range c.Resources.Requests {
+			current := aggregate[name]
+			current.Add(qty)
+			aggregate[name] = current
+		}
+	}
+
+	// Take max across init containers
+	for _, c := range p.Spec.InitContainers {
+		for name, qty := range c.Resources.Requests {
+			current := aggregate[name]
+			if current.Cmp(qty) < 0 {
+				aggregate[name] = qty.DeepCopy()
+			}
+		}
+	}
+
+	// Add pod overhead
+	if p.Spec.Overhead != nil {
+		for name, qty := range p.Spec.Overhead {
+			current := aggregate[name]
+			current.Add(qty)
+			aggregate[name] = current
 		}
 	}
 	return aggregate

@@ -278,7 +278,7 @@ func CreateTestScalingPlanner(t *testing.T, args Args, traceDir string, verbosit
 		t.Fatalf("failed to create SchedulerLauncher: %v", err)
 		return
 	}
-	storageMetaAccess := &testStorageMetaAccess{provider: args.VolGenInput.Provider}
+	storageMetaAccess := samples.GetStorageMetaAccess(args.VolGenInput.Provider)
 	scalePlannerArgs := plannerapi.ScalingPlannerArgs{
 		ViewAccess:        viewAccess,
 		ResourceWeigher:   args.Factories.ResourceWeigher,
@@ -314,18 +314,6 @@ func (d *Data) validateAndFillDefaults(t *testing.T, args *Args) bool {
 	d.Request.SimulatorStrategy = cmp.Or(args.SimulatorStrategy, commontypes.SimulatorStrategySingleNodeMultiSim)
 	d.Request.AdviceGenerationMode = cmp.Or(args.AdviceGenerationMode, commontypes.ScalingAdviceGenerationModeAllAtOnce)
 	return true
-}
-
-var _ plannerapi.StorageMetaAccess = (*testStorageMetaAccess)(nil)
-
-type testStorageMetaAccess struct {
-	provider commontypes.CloudProvider
-}
-
-func (s *testStorageMetaAccess) GetFallbackCSINodeSpec(instanceType string) (csiNodeSpec storagev1.CSINodeSpec, err error) {
-	maxVolumes := samples.GetMaxAllocatableVolumes(s.provider, instanceType)
-	csiNodeSpec.Drivers, err = samples.GetCSINodeDrivers(s.provider, maxVolumes)
-	return
 }
 
 // getAllNodePlacements computes all the possible NodePlacements for the ScalingConstraintSpec.

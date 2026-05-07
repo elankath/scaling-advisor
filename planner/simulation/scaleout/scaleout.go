@@ -22,6 +22,8 @@ import (
 	"github.com/gardener/scaling-advisor/common/volutil"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	schedulingcorev1 "k8s.io/component-helpers/scheduling/corev1"
+	"k8s.io/component-helpers/scheduling/corev1/nodeaffinity"
 )
 
 var _ plannerapi.ScaleOutSimulation = (*defaultSimulation)(nil)
@@ -160,7 +162,7 @@ func (s *defaultSimulation) workAndTrackUntilStabilized(ctx context.Context, vie
 // SimulatorStrategy supports multiple node scaling, a call is issued to CreateSimulationNodes
 func (s *defaultSimulation) doWork(ctx context.Context, view minkapi.View) error {
 	log := logr.FromContextOrDiscard(ctx)
-	log.V(3).Info("Invoked doWork", "viewName", view.GetName())
+	log.V(6).Info("Invoked doWork", "viewName", view.GetName())
 	provisionedPvs, err := volutil.ProvisionAndBindVolumesFoSelectedClaimsInWFFC(ctx, view)
 	if err != nil {
 		return err
@@ -262,15 +264,59 @@ func ComputeNodeTemplateCounts(strategy commontypes.SimulatorStrategy, templates
 		}, nil
 	}
 	var (
-		templateCounts = make([]NodeTemplateCount, 0, len(templates))
+		templateCounts          = make([]NodeTemplateCount, len(templates))
+		templateNameToFakeNodes = make(map[string]*corev1.Node)
 	)
-	for _, tmpl := range templates {
-		templateCounts = append(templateCounts, NodeTemplateCount{
-			ScaleOutNodeTemplate: tmpl,
-			count:                len(podInfos),
-		})
+	for i, tmpl := range templates {
+		templateCounts[i].ScaleOutNodeTemplate = tmpl
+		templateNameToFakeNodes[tmpl.TemplateName] = nodeutil.NewNode(tmpl, fmt.Sprintf("fake-%d", i), nil)
+	}
+
+	for _, podInfo := range podInfos {
+		pod := podutil.AsPod(podInfo)
+		for i, tmpl := range templates {
+			fakeNode := templateNameToFakeNodes[tmpl.TemplateName]
+			ok, err := PodFitsNode(pod, fakeNode)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			templateCounts[i].count++
+		}
 	}
 	return templateCounts, nil
+}
+
+// PodFitsNode returns true if the Pod can be scheduled onto the Node.
+//
+// It evaluates NodeSelector and required NodeAffinity, checks taints against the Pod's tolerations, and verifies that
+// the Node's allocatable resources are sufficient for the Pod's total resource requests.
+func PodFitsNode(pod *corev1.Pod, node *corev1.Node) (bool, error) {
+	// Checks both NodeSelector + Required NodeAffinity
+	ok, err := nodeaffinity.GetRequiredNodeAffinity(pod).Match(node)
+	if err != nil || !ok {
+		return ok, err
+	}
+
+	// Check Taints / Tolerations
+	if len(node.Spec.Taints) > 0 {
+		_, isUntolerated := schedulingcorev1.FindMatchingUntoleratedTaint(
+			node.Spec.Taints,
+			pod.Spec.Tolerations,
+			nil,
+		)
+		if isUntolerated {
+			return false, nil
+		}
+	}
+	// Check Resource fit
+	if !objutil.HasSufficientResources(node.Status.Allocatable, podutil.AggregatePodRequests(pod)) {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func getUnscheduledPodsMap(ctx context.Context, v minkapi.View) (unscheduled map[commontypes.NamespacedName]plannerapi.PodInfo, err error) {

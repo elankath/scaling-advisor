@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: beta-1"
+  namespace: "default"
+  labels:
+    app.kubernetes.io/name: "beta"
+    app.kubernetes.io/instance: "beta-instance"
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: "beta-component"
+    app.kubernetes.io/part-of: "perf_test"
+    app.kubernetes.io/managed-by: "scaling-advisor"
+spec:
+  schedulerName: "bin-packing-scheduler"
+  containers:
+    - image: registry.k8s.io/pause:3.5
+      name: pause
+      resources:
+        requests:
+          cpu: "1900m"
+          memory: "7Gi"
+  tolerations:
+    - key: "maintenance"
+      operator: "Equal"
+      value: "true"
+      effect: "PreferNoSchedule"
+  terminationGracePeriodSeconds: 0

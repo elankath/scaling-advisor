@@ -259,6 +259,7 @@ func (s *simulatorMultiSim) processScaleOutSimResults(ctx context.Context, simul
 			err = fmt.Errorf("%w: node scoring failed for simulation %q of group %q: %w", plannerapi.ErrComputeNodeScore, sr.Name, simulationGroupName, err)
 			return
 		}
+		log.V(4).Info("Computed NodeScore", "nodeScoreName", nodeScore.Name, "nodeScoreValue", nodeScore.Value)
 		simGroupPassScores.AllScores = append(simGroupPassScores.AllScores, nodeScore)
 	}
 	if len(simGroupPassScores.AllScores) > 0 {
@@ -267,6 +268,7 @@ func (s *simulatorMultiSim) processScaleOutSimResults(ctx context.Context, simul
 			err = fmt.Errorf("%w: node score selection failed for group %q: %w", plannerapi.ErrSelectNodeScore, simulationGroupName, err)
 			return
 		}
+		log.V(3).Info("Winner NodeScore", "nodeScoreName", simGroupPassScores.WinnerScore.Name, "nodeScoreValue", simGroupPassScores.WinnerScore.Value)
 	}
 	if simGroupPassScores.WinnerScore == nil {
 		return

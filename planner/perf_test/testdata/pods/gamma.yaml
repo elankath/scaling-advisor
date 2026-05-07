@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "gamma-1"
+  namespace: "default"
+  labels:
+    app.kubernetes.io/name: "gamma"
+    app.kubernetes.io/instance: "gamma-instance"
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: "gamma-component"
+    app.kubernetes.io/part-of: "perf_test"
+    app.kubernetes.io/managed-by: "scaling-advisor"
+spec:
+  schedulerName: "bin-packing-scheduler"
+  containers:
+    - image: registry.k8s.io/pause:3.5
+      name: pause
+      resources:
+        requests:
+          cpu: "3900m"
+          memory: "15Gi"
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: "topology.kubernetes.io/zone"
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: "gamma-instance"
+  terminationGracePeriodSeconds: 0

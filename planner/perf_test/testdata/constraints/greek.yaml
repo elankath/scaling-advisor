@@ -1,0 +1,66 @@
+apiVersion: sa.gardener.cloud/v1alpha1
+kind: ScalingConstraint
+metadata:
+  name: greek
+  namespace: default
+spec:
+  nodePools:
+    - name: alpha
+      availabilityZones:
+        - eu-west-1a
+      labels:
+        kubernetes.io/arch: amd64
+        node.kubernetes.io/role: node
+        sa.gardener.cloud/node-pool: alpha
+      taints:
+        - key: "maintenance"
+          value: "true"
+          effect: "PreferNoSchedule"
+      nodeTemplates:
+        - architecture: amd64
+          capacity:
+            cpu: "2"
+            gpu: "0"
+            memory: 8Gi
+          instanceType: m5.large
+          name: m5l
+          priority: 1
+      priority: 3
+      region: eu-west-1
+    - name: beta
+      availabilityZones:
+        - eu-west-1a
+      labels:
+        kubernetes.io/arch: amd64
+        node.kubernetes.io/role: node
+        sa.gardener.cloud/node-pool: beta
+      nodeTemplates:
+        - architecture: amd64
+          capacity:
+            cpu: "2"
+            gpu: "0"
+            memory: 8Gi
+          instanceType: m5.large
+          name: m5l
+          priority: 1
+      priority: 2
+      region: eu-west-1
+    - name: gamma
+      availabilityZones:
+        - eu-west-1a
+        - eu-west-1b
+      labels:
+        kubernetes.io/arch: amd64
+        node.kubernetes.io/role: node
+        sa.gardener.cloud/node-pool: gamma
+      nodeTemplates:
+        - architecture: amd64
+          capacity:
+            cpu: "4"
+            gpu: "0"
+            memory: 16Gi
+          instanceType: m5.xlarge
+          name: m5xl
+          priority: 1
+      priority: 1
+      region: eu-west-1

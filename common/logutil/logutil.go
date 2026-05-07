@@ -68,7 +68,7 @@ func DumpObjectIfNeeded(ctx context.Context, obj metav1.Object) error {
 	}
 	runtimeObj := obj.(runtime.Object)
 	var yamlDumpPath string
-	yamlDumpPath, err := objutil.SaveRuntimeObjAsYAMLToPath(runtimeObj, traceDir, obj.GetName()+".yaml")
+	yamlDumpPath, err := objutil.SaveRuntimeObjAsYAMLToPath(runtimeObj, traceDir, runtimeObj.GetObjectKind().GroupVersionKind().Kind+"-"+obj.GetName()+".yaml")
 	if err != nil {
 		return err
 	}

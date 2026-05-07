@@ -1,0 +1,43 @@
+apiVersion: sa.gardener.cloud/v1alpha1
+kind: ScalingConstraint
+metadata:
+  name: redmaroon
+  namespace: default
+spec:
+  nodePools:
+    - name: red
+      availabilityZones:
+        - eu-west-1a
+      labels:
+        kubernetes.io/arch: amd64
+        node.kubernetes.io/role: node
+        sa.gardener.cloud/node-pool: red
+      nodeTemplates:
+        - architecture: amd64
+          capacity:
+            cpu: "2"
+            gpu: "0"
+            memory: 8Gi
+          instanceType: m5.large
+          name: m5l
+          priority: 1
+      priority: 1
+      region: eu-west-1
+    - name: maroon
+      availabilityZones:
+        - eu-west-1a
+      labels:
+        kubernetes.io/arch: amd64
+        node.kubernetes.io/role: node
+        sa.gardener.cloud/node-pool: maroon
+      nodeTemplates:
+        - architecture: amd64
+          capacity:
+            cpu: "4"
+            gpu: "0"
+            memory: 16Gi
+          instanceType: m5.xlarge
+          name: m5xl
+          priority: 1
+      priority: 1
+      region: eu-west-1

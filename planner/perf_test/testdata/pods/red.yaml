@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "red-1"
+  namespace: "default"
+  labels:
+    app.kubernetes.io/name: "red"
+    app.kubernetes.io/instance: "red-instance"
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: "red-component"
+    app.kubernetes.io/part-of: "perf_test"
+    app.kubernetes.io/managed-by: "scaling-advisor"
+spec:
+  schedulerName: "bin-packing-scheduler"
+  containers:
+    - image: registry.k8s.io/pause:3.5
+      name: pause
+      resources:
+        requests:
+          cpu: "1900m"
+          memory: "7Gi"
+  terminationGracePeriodSeconds: 0

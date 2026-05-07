@@ -43,9 +43,9 @@ const (
 	// LabelSimulationRunNum is the label key to identify the run number for the simulation which produced this object.
 	LabelSimulationRunNum = "sa.gardener.cloud/simulation-run-num"
 	// LabelNodePoolName is the label key to identify the node pool name for which the simulation is being run.
-	LabelNodePoolName = "sa.gardener.cloud/node-pool-name"
+	LabelNodePoolName = "sa.gardener.cloud/node-pool"
 	// LabelNodeTemplateName is the label key to identify the node template name for which the simulation is being run.
-	LabelNodeTemplateName = "sa.gardener.cloud/node-template-name"
+	LabelNodeTemplateName = "sa.gardener.cloud/node-template"
 	// LabelRequestID is the label key to identify the request Name of scaling advice request.
 	LabelRequestID = "sa.gardener.cloud/request-id"
 	// LabelCorrelationID is the label key to identify the correlation Name of the scaling advice request.
