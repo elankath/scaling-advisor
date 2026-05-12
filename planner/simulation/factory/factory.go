@@ -6,6 +6,7 @@
 package factory
 
 import (
+	commontypes "github.com/gardener/scaling-advisor/api/common/types"
 	"github.com/gardener/scaling-advisor/planner/simulation/scaleout"
 
 	plannerapi "github.com/gardener/scaling-advisor/api/planner"
@@ -19,6 +20,10 @@ func New() plannerapi.SimulationFactory {
 }
 
 type defaultFactory struct{}
+
+func (s *defaultFactory) NewNodeEstimator(strategy commontypes.SimulatorStrategy) (plannerapi.NodeEstimator, error) {
+	return scaleout.NewNodeEstimator(strategy), nil
+}
 
 func (s *defaultFactory) NewScaleOut(args plannerapi.ScaleOutSimArgs) (plannerapi.ScaleOutSimulation, error) {
 	return scaleout.NewDefault(args)

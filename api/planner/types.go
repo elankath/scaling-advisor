@@ -477,11 +477,12 @@ type SimulatorFactory interface {
 	// TODO: Add GetScaleInSimulator here.
 }
 
-// SimulationFactory is a factory facade for creating Simulation objects
+// SimulationFactory is a factory facade for creating Simulation and helpers related to simulation.
 type SimulationFactory interface {
 	// NewScaleOut creates a ScaleOutSimulation instance with the given name and arguments.
 	NewScaleOut(args ScaleOutSimArgs) (ScaleOutSimulation, error)
-	// TODO: Add NewScaleIn method here.
+	// NewNodeEstimator creates a NodeEstimator that estimates nodes for the given strategy.
+	NewNodeEstimator(strategy commontypes.SimulatorStrategy) (NodeEstimator, error)
 }
 
 // SimulatorArgs is an encapsulation of the arguments used to create a ScaleOutSimulator or ScaleInSimulator.

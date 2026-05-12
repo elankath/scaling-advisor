@@ -197,6 +197,9 @@ func validateSimArgs(args *plannerapi.ScaleOutSimArgs) error {
 	if args.SchedulerLauncher == nil {
 		return fmt.Errorf("scheduler launcher must not be nil for simulation %q", args.Name)
 	}
+	if args.NodeEstimator == nil {
+		return fmt.Errorf("node estimator launcher must not be nil for scale-out simulation %q", args.Name)
+	}
 	pk := args.NodeTemplates[0].PriorityKey
 	for _, t := range args.NodeTemplates {
 		if strings.TrimSpace(t.Region) == "" {
@@ -343,11 +346,4 @@ func getNodeResourceInfo(node *corev1.Node) plannerapi.NodeResourceInfo {
 		Capacity:     node.Status.Capacity,
 		Allocatable:  node.Status.Allocatable,
 	}
-}
-
-// NodeTemplateCount extends the [plannerapi.ScaleOutNodeTemplate] with a count representing the number of nodes to create
-// for this template
-type NodeTemplateCount struct {
-	plannerapi.ScaleOutNodeTemplate
-	count int
 }

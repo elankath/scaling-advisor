@@ -105,6 +105,8 @@ type ScaleOutSimArgs struct {
 	SchedulerLauncher SchedulerLauncher
 	// StorageMetaAccess is interrogated for metadata to create CSINodes for the simulation
 	StorageMetaAccess StorageMetaAccess
+	// NodeEstimator is used to estimate number of virtual nodes to create for the simulation
+	NodeEstimator NodeEstimator
 	// RunCounter is an atomic counter for tracking simulation runs.
 	RunCounter *atomic.Uint32
 	// Name is the name of the simulation instance
@@ -117,6 +119,13 @@ type ScaleOutSimArgs struct {
 	NodeTemplates []ScaleOutNodeTemplate
 	// Config is the simulation configuration.
 	Config SimulatorConfig
+}
+
+// NodeEstimator is used by the [ScaleOutSimulation] to estimate number of virtual nodes to create for the simulation
+// given the slice of [ScaleOutNodeTemplate] and slice of [PodInfo]
+type NodeEstimator interface {
+	// InitialTemplateCounts estimates the count associated with each [ScaleOutNodeTemplate] for the given slice of [PodInfo]
+	InitialTemplateCounts(templates []ScaleOutNodeTemplate, podInfos []PodInfo) ([]ScaleOutNodeTemplateCount, error)
 }
 
 // ScaleOutNodeTemplate is a superset of the [sacorev1alpha1.NodePlacement] consisting of enough information to create
@@ -151,6 +160,14 @@ type ScaleOutNodeTemplate struct {
 	PriorityKey commontypes.PriorityKey
 }
 
+// ScaleOutNodeTemplateCount extends the [plannerapi.ScaleOutNodeTemplate] with a count representing the number of nodes to create
+// for this template
+type ScaleOutNodeTemplateCount struct {
+	ScaleOutNodeTemplate
+	// Count is the number of nodes to create for the [ScaleOutNodeTemplate]
+	Count int
+}
+
 // ScaleOutSimResult contains the results of a completed simulation run.
 type ScaleOutSimResult struct {
 	// Name of the ScaleOutSimulation that produced this result.
@@ -175,7 +192,7 @@ type ScaleOutSimGroup interface {
 	commontypes.Resettable
 	// Name returns the name of the simulation group.
 	Name() string
-	// GetKey returns the simulation group key.
+	// PriorityKey returns the simulation group key.
 	PriorityKey() commontypes.PriorityKey
 	// GetSimulations returns all simulations in this group.
 	GetSimulations() []ScaleOutSimulation

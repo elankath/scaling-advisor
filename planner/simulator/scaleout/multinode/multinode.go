@@ -95,9 +95,6 @@ func (s *simulatorSingleSim) runAllGroups(ctx context.Context) (err error) {
 }
 
 func (s *simulatorSingleSim) runPassForGroup(ctx context.Context, group plannerapi.ScaleOutSimGroup, groupPassView minkapi.View) (simResults []plannerapi.ScaleOutSimResult, nextGroupPassView minkapi.View, err error) {
-	//var (
-	//	log = logr.FromContextOrDiscard(ctx)
-	//)
 	simResults, err = group.Run(ctx, func(ctx context.Context, name string) (minkapi.View, error) {
 		return s.state.CreateSandboxView(ctx, name, groupPassView)
 	})
@@ -107,9 +104,8 @@ func (s *simulatorSingleSim) runPassForGroup(ctx context.Context, group plannera
 	if len(simResults) == 0 {
 		nextGroupPassView = groupPassView
 		return
-	} else {
-		nextGroupPassView = simResults[0].View // all simResults share the same View in this strategy
 	}
+	nextGroupPassView = simResults[0].View // all simResults share the same View in this strategy
 	if s.state.Request.AdviceGenerationMode.IsIncremental() {
 		err = scaleout.SendPlanResultUsingSimResults(ctx, s.state.ResultCh, s.state.Request, s.state.SimRunCounter.Load(), simResults)
 	}
@@ -126,11 +122,16 @@ func (s *simulatorSingleSim) createAndGroupSimulations(ctx context.Context) ([]p
 	)
 	for pk, templates := range templatesByPriority {
 		simulationName := fmt.Sprintf("sim-%d_%s", simNum, pk.String())
+		nodeEstimator, err := s.state.SimulationFactory.NewNodeEstimator(commontypes.SimulatorStrategyMultiNodeSingleSim)
+		if err != nil {
+			return nil, err
+		}
 		simArgs := plannerapi.ScaleOutSimArgs{
 			Name:              simulationName,
 			RunCounter:        s.state.SimRunCounter,
 			SchedulerLauncher: s.schedulerLauncher,
 			StorageMetaAccess: s.storageMetaAccess,
+			NodeEstimator:     nodeEstimator,
 			Config:            s.simulatorConfig,
 			NodeTemplates:     templates,
 			Strategy:          commontypes.SimulatorStrategyMultiNodeSingleSim,
