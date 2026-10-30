@@ -79,56 +79,63 @@ config:
     mirrorActors: false
 ---
 sequenceDiagram
-    participant ci as ControlClusterInformer
-    participant ti as TargetClusterInformer
+    participant crt as ControllerRuntime
+    participant cc as ControlCluster
+    participant tc as TargetCluster
     participant rc as Reconciler
     participant sp as ScalingPlanner
     participant lm as LifecycleManager
 
-    rc->>+ci: get constraint objects
-    note right of ci: ScalingConstraint, ScalingFeedback,<br/>NodeTemplateSet, InstanceTypeDefSet,<br/>InstancePriceSet
-    ci-->>-rc: objects
-    rc->>rc: validate ScalingConstraint
-    alt validation fails
-        rc->>ci: set ScalingConstraint.Status.Conditions (Accepted=False)
-        rc-->>rc: return error
-    else validation passes
-        rc->>ci: set ScalingConstraint.Status.Conditions (Accepted=True)
-        rc->>+ti: get scheduling relevant objects
-        note right of ti: Nodes, Pods, PVs, PVCs,<br/>StorageClasses, RuntimeClasses, CSINodes
-        ti-->>-rc: objects
-        rc->>rc: build ClusterSnapshot
-        rc->>rc: build Request (ClusterSnapshot, ScalingConstraint, NodeTemplates, InstanceTypeDefs, InstancePrices, Memento)
-        rc->>+sp: Plan(Request)
-        loop deliver results
-            sp-->>rc: Response (ScaleOutPlan, ScaleInPlan, Diagnostics)
+    crt->>+rc: invoke Reconcile
+    note right of crt: unscheduled pod event<br/>or short RequeueAfter
+
+    rc->>rc: check batchWindowStart set?
+    alt batchWindowStart not set
+        rc->>rc: set batchWindowStart = now
+        rc-->>crt: RequeueAfter batchWindowDuration
+    else within batch window
+        rc-->>crt: RequeueAfter (batchWindowStart + batchWindowDuration - now)
+    else batch window elapsed
+        rc->>+cc: get constraint objects
+        note right of cc: ScalingConstraint, ScalingFeedback,<br/>NodeTemplateSet, InstanceTypeDefSet,<br/>InstancePriceSet
+        cc-->>-rc: objects
+        rc->>rc: validate ScalingConstraint
+        alt validation fails
+            rc->>cc: set ScalingConstraint.Status.Conditions (Accepted=False)
+            rc-->>crt: return error
+        else validation passes
+            rc->>cc: set ScalingConstraint.Status.Conditions (Accepted=True)
+            rc->>+tc: get scheduling relevant objects
+            note right of tc: Nodes, Pods, PVs, PVCs,<br/>StorageClasses, RuntimeClasses, CSINodes
+            tc-->>-rc: objects
+            rc->>rc: build ClusterSnapshot
+            rc->>rc: build Request (ClusterSnapshot, ScalingConstraint, NodeTemplates, InstanceTypeDefs, InstancePrices, Memento)
+            rc->>+sp: Plan(Request)
+            loop deliver results
+                sp-->>rc: Response (ScaleOutPlan, ScaleInPlan, Diagnostics)
+            end
+            sp-->>-rc: done
+            rc->>rc: form ScalingAdvice (ScaleOutPlan, ScaleInPlan, Diagnostics)
+            rc->>cc: write ScalingAdvice to ctl cluster
+            lm->>lm: watch ScalingAdvice, provision/decommission instances
+            lm->>cc: write ScalingFeedback to ctl cluster
         end
-        sp-->>-rc: done
-        rc->>rc: form ScalingAdvice (ScaleOutPlan, ScaleInPlan, Diagnostics)
-        rc->>ci: write ScalingAdvice to ctl cluster
-        lm->>lm: watch ScalingAdvice, provision/decommission instances
-        lm->>ci: write ScalingFeedback to ctl cluster
     end
 ```
 
-#### Design Doubt: Cluster Stabilization Needed or Skip ?
+##### WHen does Operator invoke ScalignPlanner
 
-> [!NOTE]
-> This is an open design question. The intent is to avoid invoking the planner against a cluster that is in the middle of heavy changes, which would produce advice based on transient state. Though we discussed this abck and forth, we never came to a team-agreed conclusion.
+> [!NOTE] Went for Vivek's simplified solution instead of all the un-needed complexity.
 
-**Proposal**: before invoking the planner, the `Reconciler` checks whether the cluster has stabilized since the last scan. The cluster is considered stable if, since the last reconcile tick, none of the following have occurred:
+1. The controller runtime is configured to invoke `Reconcile` 
+for unscheduled pod events or explit short `RequeueAfter`.
+1. In Operator Reconcile
+    1. Check if `batchWindowStart` is set ? If not,  If not, then set it and requeue after `batchWindowDuration`: `ctrl.Result{RequeueAfter:  batchWindowDuration}`
+    1. If `duration=(now - batchWindowStart)` has not yet crossed the configured `batch-window-duration`, then return from `Reconcile` with `ctrl.Result{RequeueAfter: batchWindowStart+batch-window-duration-now}`.
+1. Invoke `ScalingPlanner.Plan(ctx, reqeust)`, proceeding as illustrated in above figure.  
 
-- A new node has appeared.
-- An existing node has disappeared.
-- A new unscheduled pod has appeared.
-- A pod has been evicted/deleted.
 
-If the cluster is not stable, the `Reconciler` skips the planner invocation and waits for the next reconcile tick.
 
-**Exception**: if the minimum underutilized duration across all node pools has been exceeded (i.e. scale-in is overdue), the planner is invoked regardless of cluster stability. If `ScalingConstraint.NodePool[i].ScalingParams.UnderutilizedDuration` is not specified, a default is used.
-
-**Open questions**:
-- Should cancellation of an in-progress planner invocation be triggered when the cluster diverges significantly mid-run? It was decided to defer this to post-MVP due to complexity.
 
 #### Operator Lifecycle Manager Interactions
 
@@ -151,7 +158,7 @@ config:
     mirrorActors: false
 ---
 sequenceDiagram
-    participant ci as ControlClusterInformer
+    participant ci as ControlCluster
     participant rc as Reconciler
     participant lm as LifecycleManager
 
