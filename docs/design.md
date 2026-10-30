@@ -117,6 +117,7 @@ sequenceDiagram
             sp-->>-rc: done
             rc->>rc: form ScalingAdvice (ScaleOutPlan, ScaleInPlan, Diagnostics)
             rc->>cc: write ScalingAdvice to ctl cluster
+            rc->>rc: clear batchWindowStart
             lm->>lm: watch ScalingAdvice, provision/decommission instances
             lm->>cc: write ScalingFeedback to ctl cluster
         end
@@ -127,12 +128,12 @@ sequenceDiagram
 
 > [!NOTE] Went for Vivek's simplified solution instead of all the un-needed complexity.
 
-1. The controller runtime is configured to invoke `Reconcile` 
-for unscheduled pod events or explit short `RequeueAfter`.
-1. In Operator Reconcile
-    1. Check if `batchWindowStart` is set ? If not,  If not, then set it and requeue after `batchWindowDuration`: `ctrl.Result{RequeueAfter:  batchWindowDuration}`
-    1. If `duration=(now - batchWindowStart)` has not yet crossed the configured `batch-window-duration`, then return from `Reconcile` with `ctrl.Result{RequeueAfter: batchWindowStart+batch-window-duration-now}`.
-1. Invoke `ScalingPlanner.Plan(ctx, reqeust)`, proceeding as illustrated in above figure.  
+1. The controller runtime is configured to invoke `Reconcile` for unscheduled pod events or explicit short `RequeueAfter`.
+1. In Operator Reconcile:
+    1. Check if `batchWindowStart` is set. If not, set `batchWindowStart = now` and return early: `ctrl.Result{RequeueAfter: batchWindowDuration}`.
+    1. If `duration=(now - batchWindowStart)` has not yet crossed the configured `batch-window-duration`, return early: `ctrl.Result{RequeueAfter: batchWindowStart + batchWindowDuration - now}`.
+    1. Batch window has elapsed: invoke `ScalingPlanner.Plan(ctx, request)`, proceeding as illustrated in the above figure.
+    1. After a successful planner invocation, **clear `batchWindowStart`** so the window re-arms for the next batch of events.
 
 
 
