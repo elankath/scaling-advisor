@@ -60,16 +60,12 @@ The operator accepts the following CLI parameters:
 
 | Parameter | Required | Description |
 |---|---|---|
-| `--control-namespace` | Yes | Namespace in the control cluster where `ScalingConstraint`, `ScalingAdvice`, `ScalingFeedback`, `NodeTemplateSet`, `InstanceTypeDefSet`, and `InstancePriceSet` objects reside. |
+| `--control-namespace` | Yes | Namespace in the control cluster where `ScalingConstraint`, `ScalingAdvice`, `ScalingFeedback` objects reside. |
 | `--control-kubeconfig` | Yes | Kubeconfig for the control cluster. |
 | `--target-kubeconfig` | Yes | Kubeconfig for the target (workload) cluster. |
-| `--catalog-kubeconfig` | No | Kubeconfig for an optional catalog cluster hosting shared `NodeTemplateSet`, `InstanceTypeDefSet`, and `InstancePriceSet` overrides. Falls back to `--control-kubeconfig` if absent. |
+| `--catalog-kubeconfig` | No | Kubeconfig for an optional catalog cluster hosting shared `NodeTemplateSet`, `InstanceTypeDefSet`, and `InstancePriceSet` overrides. Falls back to `--shoot-kubeconfig` if absent. |
 
-**Catalog precedence**: when `--catalog-kubeconfig` is provided, the operator reads `NodeTemplateSet`, `InstanceTypeDefSet`, and `InstancePriceSet` from the catalog cluster in preference to the control cluster. This allows a shared catalog of instance types and pricing to be maintained centrally and consumed by multiple operators.
-
-##### Design Doubt: Support Binding Custom Resources ?
-Instead of a `--catelog-kubeconfig` should we introduce Binding objects for our CRD's so that they can reference another ns/namespace ?
-gardener introduced `CredentialsBinding` for this purpose after all. This way only the `Binding` objects for common catalog objects need be introduced in the control cluster. 
+**Catalog precedence**: when `--catalog-kubeconfig` is provided, the operator reads `NodeTemplateSet`, `InstanceTypeDefSet`, and `InstancePriceSet` from the catalog cluster in preference to the shoot cluster. This allows a shared catalog of instance types and pricing to be maintained centrally and consumed by multiple operators.
 
 #### Operator Reconciliation
 
