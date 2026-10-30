@@ -4,7 +4,7 @@
 
 The `scaling-advisor` is an *advisory controller* that operates across two clusters:
 
-- **Control cluster**: hosts the custom resources that provide constraints and configuratino for scaling.
+- **Control cluster**: hosts the custom resources that provide constraints and configuration for scaling.
 - **Target cluster**: the workload cluster for whom scaling advice should be generated.
 
 The operator watches both clusters and runs a reconcile loop on every relevant change:
