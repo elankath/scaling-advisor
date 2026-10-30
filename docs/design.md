@@ -124,16 +124,16 @@ sequenceDiagram
     end
 ```
 
-##### WHen does Operator invoke ScalignPlanner
+##### When does Operator invoke ScalignPlanner
 
 > [!NOTE] Went for Vivek's simplified solution instead of all the un-needed complexity.
 
 1. The controller runtime is configured to invoke `Reconcile` for unscheduled pod events or explicit short `RequeueAfter`.
 1. In Operator Reconcile:
     1. Check if `batchWindowStart` is set. If not, set `batchWindowStart = now` and return early: `ctrl.Result{RequeueAfter: batchWindowDuration}`.
-    1. If `duration=(now - batchWindowStart)` has not yet crossed the configured `batch-window-duration`, return early: `ctrl.Result{RequeueAfter: batchWindowStart + batchWindowDuration - now}`.
-    1. Batch window has elapsed: invoke `ScalingPlanner.Plan(ctx, request)`, proceeding as illustrated in the above figure.
-    1. After a successful planner invocation, **clear `batchWindowStart`** so the window re-arms for the next batch of events.
+    1. If `remaining = batchWindowDuration - (now - batchWindowStart)` is still positive, return early: `ctrl.Result{RequeueAfter: remaining}`.
+    1. Batch window has elapsed: fetch and validate constraint objects from the control cluster and scheduling-relevant objects from the target cluster, then invoke `ScalingPlanner.Plan(ctx, request)`, proceeding as illustrated in the above figure.
+    1. Clear `batchWindowStart` (whether the planner succeeded or failed) so the window re-arms for the next batch of events.
 
 
 
