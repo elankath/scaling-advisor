@@ -32,6 +32,13 @@ classDiagram
         +Labels map~string,string~
         +Error error
     }
+    class ScaleOutPlan {
+        +UnsatisfiedPodNames []string
+        +Items []ScaleOutItem
+    }
+    class ScaleInPlan {
+        +Items []ScaleInItem
+    }
     class ClusterSnapshot {
         +Nodes []NodeInfo
         +Pods []PodInfo
@@ -91,6 +98,8 @@ classDiagram
     Request *-- ScalingConstraintSpec
     Request ..> ScalingAdviceGenerationMode : adviceGenerationMode
     Response *-- RequestRef
+    Response *-- ScaleOutPlan
+    Response *-- ScaleInPlan
     Memento *-- ScaleInMemento
     Memento *-- ScaleOutMemento
     ScalingConstraintSpec ..> PlannerStrategy
