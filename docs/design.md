@@ -131,16 +131,16 @@ sequenceDiagram
 
 ##### When does Operator invoke ScalingPlanner
 
-**What triggers `Reconcile`**: any event on a control-cluster or target-cluster object watched by the operator, an explicit `ctrl.Result{RequeueAfter: SyncPeriod}` returned from a prior reconcile, or the `manager.Options.Cache.SyncPeriod` fallback (configurable, default `10s`).
+**What triggers `Reconcile`**: any event on a control-cluster or target-cluster object watched by the operator, an explicit `ctrl.Result{RequeueAfter: X}` returned from a prior reconcile, or the `manager.Options.Cache.SyncPeriod` fallback (configurable, default `10s`).
 
 **`Reconcile` flow**:
 
-1. Fetch constraint objects (`ScalingConstraint`, `ScalingFeedback`) from the control cluster, catalog objects (`NodeTemplateSet`, `InstanceTypeDefSet`, `InstancePriceSet`) from the catalog cluster (falling back to the control cluster), and scheduling-relevant objects (`Nodes`, `Pods`, `PVs`, etc.) from the target cluster.
+1. Fetch constraint objects (`ScalingConstraint`, `ScalingFeedback`) from the control cluster, catalog objects (`NodeTemplateSet`, `InstanceTypeDefSet`, `InstancePriceSet`) from the catalog cluster (falling back to the shoot cluster), and scheduling-relevant objects (`Nodes`, `Pods`, `PVs`, etc.) from the target cluster.
 2. Validate constraint and catalog objects. On failure, set `ScalingConstraint.Status.Conditions (Accepted=False)` and return error. On success, set `Accepted=True`.
 3. Build a `Request` from the fetched objects and the latest saved `Memento` (if any).
 4. Invoke `ScalingPlanner.Prepare`:
     ```
-    shouldPlan, preparedRequest, batchWindowStart = ScalingPlanner.Prepare(ctx, request, batchWindowStart)
+    shouldPlan, preparedRequest, updatedBatchWindowStart = ScalingPlanner.Prepare(ctx, request, batchWindowStart)
     ```
     `batchWindowStart` is operator state (a field on the `Reconciler` struct), passed in and returned so `Prepare` remains stateless. Similarly, `Memento` is operator state — the `Reconciler` persists it between reconcile cycles and injects it into each `Request`; the planner never stores it. The operator always saves `preparedRequest.Memento` after this call regardless of `shouldPlan`.
 
@@ -149,7 +149,7 @@ sequenceDiagram
     - **Scale-out path** (batch window applies):
         - If no unschedulable pods then clear `batchWindowStart` to zero, `shouldPlan=false`.
         - If unschedulable pods present and `batchWindowStart` is zero, then`batchWindowStart=now`, `shouldPlan=false`.
-            -  if `remaining = batchWindowDuration - (now - batchWindowStart)` > `0`, then  `shouldPlan=false`, `batchWindowStart` unchanged.
+        -  If unschedulable pods present and `remaining = batchWindowDuration - (now - batchWindowStart)` > `0`, then  `shouldPlan=false`, `batchWindowStart` unchanged.
         - If unschedulable pods present and window expired, then `shouldPlan=true`, `batchWindowStart` to zero.
 5. If `shouldPlan=true`: invoke `ScalingPlanner.Plan(ctx, preparedRequest)`, wait for `Response`s, write `ScalingAdvice`, update operator state, return `ctrl.Result{RequeueAfter: SyncPeriod}`.
 6. If `shouldPlan=false`:
@@ -184,9 +184,9 @@ sequenceDiagram
 
     rc->>ci: write ScalingAdvice (ScaleOutPlan, ScaleInPlan)
     ci-->>lm: ScalingAdvice event
-    lm->>ci: write ScalingFeedback (AcknowledgedAt = now)
     note right of lm: LM commits to acting,<br/>Reconciler unblocked for next advice
-    lm->>lm: provision and decommission instances
+    lm->>ci: write ScalingFeedback (AcknowledgedAt = now)
+    lm->>lm: initiate provision and decommission instances
     lm->>ci: update ScalingFeedback (ScaleOutFeedback, ScaleInFeedback)
     ci-->>rc: ScalingFeedback event
     rc->>rc: read ScalingFeedback, update Memento
@@ -208,7 +208,7 @@ config:
     mirrorActors: false
 ---
 sequenceDiagram
-    participant ci as ControlClusterInformer
+    participant ci as ControlCluster
     participant rc as Reconciler
     participant lm as LifecycleManager
 
@@ -222,6 +222,14 @@ sequenceDiagram
     rc->>rc: read feedback: backoff placement B until T,<br/>retain placement A in Memento
     rc->>ci: write ScalingAdvice SA2 (placement B excluded until backoff expires)
 ```
+##### LM crashes
+
+1. `ScalingAdvice` is produced by the operator.
+1. LM recovers fast
+    1. In such a case we proceed as normal as illustrated above
+1. LM recovers slowly and the `ScalingFeedback.AcknowledgedAt` is not populated for long time
+    1. Operator checks whether the latest `ScalingAdvice` is outdated, ie planner `Request` has diverged, then the outdated `ScalingAdvice` is marked as `Expired` (`Expired` condition on `ScalingAdviceStatus`) and then new `ScalingAdvice` is produced 
+
 
 ### ScalingPlanner
 `ScalingPlanner` is a *functional*, **stateless** component that takes in
@@ -249,7 +257,7 @@ etc.) changes.
 | [`PlannerStrategy`](../api/common/types.go#L49) | High-level ordering policy: whether to scale-in first, scale-out first, or consolidate into one pass. |
 | [`SimulatorStrategy`](../api/common/types.go#L92) | Simulation topology: `SingleNodeMultiSim` (one node per sim, pick winner) vs `MultiNodeSingleSim` (scale many nodes in one sim). |
 | [`NodeScoringStrategy`](../api/common/types.go#L152) | Algorithm used to rank candidate scale-out nodes: `LeastWaste` or `LeastCost`. |
-| [`ScalingAdviceGenerationMode`](../api/common/types.go#L122) | `Incremental` delivers partial responses as simulations complete; `AllAtOnce` waits for all. |
+| [`ScalingAdviceGenerationMode`](../api/common/types.go#L122) | `Incremental` delivers partial responses as simulations complete; `AllAtOnce` waits for ScalingPlanner.Plan to fully complete before writing `ScalingAdvice`. |
 
 #### Planner Strategies 
 
@@ -375,7 +383,7 @@ sequenceDiagram
     sel->>sel: filter nodes with AnnotationDoNotDisrupt
     sel->>sel: filter nodes with pods having AnnotationDoNotDisrupt
     sel->>sel: filter nodes violating PoolConfigs.MinLimits
-    sel->>sel: retain underutilized nodes (per PoolConfigs.UtilizationThresholds)
+    sel->>sel: retain underutilized nodes (per PoolConfigs.UtilizationThresholds) considering ScaleInMemento
     sel->>sel: sort by PoolPriority asc, then TemplatePriority asc, then utilization asc
     sel->>+pdb: newPDBTracker(pdbs)
     pdb-->>-sel: PDBTracker
@@ -397,10 +405,15 @@ title: ScaleInCandidateSelector - Types
 classDiagram
     class ScaleInCandidateSelector {
         <<interface>>
-        +Select(ctx, View, ScaleInCandidateSelectorArgs) []Node
+        +Select(ctx, View, ScaleInCandidateSelectorArgs) ([]Node, error)
     }
     class ScaleInCandidateSelectorArgs {
+        +Memento ScaleInMemento
         +PoolConfigs map~string,NodePoolScaleInConfig~
+    }
+    class ScaleInMemento {
+        +LastIdentifiedUnneededNodes map~string,Time~
+        +LastUnderutilizedSinceNodes map~string,Time~
     }
     class NodePoolScaleInConfig {
         +UtilizationThresholds map~ResourceName,float64~
@@ -410,6 +423,7 @@ classDiagram
     }
 
     ScaleInCandidateSelector ..> ScaleInCandidateSelectorArgs : uses
+    ScaleInCandidateSelectorArgs *-- ScaleInMemento : Memento
     ScaleInCandidateSelectorArgs *-- NodePoolScaleInConfig : PoolConfigs
 ```
 
@@ -539,6 +553,7 @@ sequenceDiagram
 
 `SimulatorStrategyMultiNodeSingleSim` represents a simulator strategy in which the `ScaleOutSimulator` runs a single simulation by scaling multiple nodes for all combinations of NodePool, NodeTemplate and AvailabilityZone, ie for all `ScaleOutNodeTemplate`s
 
+This section is 🚧.
 
 ## TODO
 
