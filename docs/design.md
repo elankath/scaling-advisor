@@ -81,6 +81,7 @@ config:
 sequenceDiagram
     participant crt as ControllerRuntime
     participant cc as ControlCluster
+    participant cat as CatalogCluster
     participant tc as TargetCluster
     participant rc as Reconciler
     participant sp as ScalingPlanner
@@ -90,17 +91,20 @@ sequenceDiagram
     note right of crt: object event, RequeueAfter,<br/>or SyncPeriod fallback
 
     rc->>+cc: get constraint objects
-    note right of cc: ScalingConstraint, ScalingFeedback,<br/>NodeTemplateSet, InstanceTypeDefSet,<br/>InstancePriceSet
+    note right of cc: ScalingConstraint, ScalingFeedback
     cc-->>-rc: objects
-    rc->>rc: validate ScalingConstraint
+    rc->>+cat: get catalog objects
+    note right of cat: NodeTemplateSet, InstanceTypeDefSet,<br/>InstancePriceSet<br/>(falls back to ControlCluster if absent)
+    cat-->>-rc: objects
+    rc->>+tc: get scheduling relevant objects
+    note right of tc: Nodes, Pods, PVs, PVCs,<br/>StorageClasses, RuntimeClasses, CSINodes
+    tc-->>-rc: objects
+    rc->>rc: validate constraint and catalog objects
     alt validation fails
         rc->>cc: set ScalingConstraint.Status.Conditions (Accepted=False)
         rc-->>crt: return error
     else validation passes
         rc->>cc: set ScalingConstraint.Status.Conditions (Accepted=True)
-        rc->>+tc: get scheduling relevant objects
-        note right of tc: Nodes, Pods, PVs, PVCs,<br/>StorageClasses, RuntimeClasses, CSINodes
-        tc-->>-rc: objects
         rc->>rc: build Request (ClusterSnapshot, ScalingConstraint, NodeTemplates, InstanceTypeDefs, InstancePrices, Memento)
         rc->>+sp: Prepare(ctx, request, batchWindowStart)
         sp-->>-rc: shouldPlan, preparedRequest, batchWindowStart
@@ -131,8 +135,10 @@ sequenceDiagram
 
 **`Reconcile` flow**:
 
-1. Build a `Request` from the shared-informer cache and the latest saved `Memento` (if any).
-2. Invoke `ScalingPlanner.Prepare`:
+1. Fetch constraint objects (`ScalingConstraint`, `ScalingFeedback`) from the control cluster, catalog objects (`NodeTemplateSet`, `InstanceTypeDefSet`, `InstancePriceSet`) from the catalog cluster (falling back to the control cluster), and scheduling-relevant objects (`Nodes`, `Pods`, `PVs`, etc.) from the target cluster.
+2. Validate constraint and catalog objects. On failure, set `ScalingConstraint.Status.Conditions (Accepted=False)` and return error. On success, set `Accepted=True`.
+3. Build a `Request` from the fetched objects and the latest saved `Memento` (if any).
+4. Invoke `ScalingPlanner.Prepare`:
     ```
     shouldPlan, preparedRequest, batchWindowStart = ScalingPlanner.Prepare(ctx, request, batchWindowStart)
     ```
@@ -145,8 +151,8 @@ sequenceDiagram
         - If unschedulable pods present and `batchWindowStart` is zero, then`batchWindowStart=now`, `shouldPlan=false`.
             -  if `remaining = batchWindowDuration - (now - batchWindowStart)` > `0`, then  `shouldPlan=false`, `batchWindowStart` unchanged.
         - If unschedulable pods present and window expired, then `shouldPlan=true`, `batchWindowStart` to zero.
-3. If `shouldPlan=true`: invoke `ScalingPlanner.Plan(ctx, preparedRequest)`, wait for `Response`s, write `ScalingAdvice`, update operator state, return `ctrl.Result{RequeueAfter: SyncPeriod}`.
-4. If `shouldPlan=false`:
+5. If `shouldPlan=true`: invoke `ScalingPlanner.Plan(ctx, preparedRequest)`, wait for `Response`s, write `ScalingAdvice`, update operator state, return `ctrl.Result{RequeueAfter: SyncPeriod}`.
+6. If `shouldPlan=false`:
     - If `batchWindowStart` is zero (no pending scale-out): return `ctrl.Result{RequeueAfter: SyncPeriod}`.
     - If `batchWindowStart` is set (window in progress): return `ctrl.Result{RequeueAfter: remaining}` so the next reconcile fires exactly when the window expires. 
 
