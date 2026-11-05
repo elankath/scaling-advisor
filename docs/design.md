@@ -136,7 +136,7 @@ sequenceDiagram
     ```
     shouldPlan, preparedRequest, batchWindowStart = ScalingPlanner.Prepare(ctx, request, batchWindowStart)
     ```
-    `batchWindowStart` is operator state (a field on the `Reconciler` struct), passed in and returned so `Prepare` remains stateless. The operator always saves `preparedRequest.Memento` after this call regardless of `shouldPlan`.
+    `batchWindowStart` is operator state (a field on the `Reconciler` struct), passed in and returned so `Prepare` remains stateless. Similarly, `Memento` is operator state — the `Reconciler` persists it between reconcile cycles and injects it into each `Request`; the planner never stores it. The operator always saves `preparedRequest.Memento` after this call regardless of `shouldPlan`.
 
     `Prepare` decides `shouldPlan` as follows:
     - **Scale-in path** (bypasses batch window): if any node has crossed its configured underutilization period, return `shouldPlan=true`, `batchWindowStart` unchanged.
