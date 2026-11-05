@@ -87,55 +87,68 @@ sequenceDiagram
     participant lm as LifecycleManager
 
     crt->>+rc: invoke Reconcile
-    note right of crt: unscheduled pod event<br/>or short RequeueAfter
+    note right of crt: object event, RequeueAfter,<br/>or SyncPeriod fallback
 
-    rc->>rc: check batchWindowStart set?
-    alt batchWindowStart not set
-        rc->>rc: set batchWindowStart = now
-        rc-->>crt: RequeueAfter batchWindowDuration
-    else within batch window
-        rc-->>crt: RequeueAfter (batchWindowStart + batchWindowDuration - now)
-    else batch window elapsed
-        rc->>+cc: get constraint objects
-        note right of cc: ScalingConstraint, ScalingFeedback,<br/>NodeTemplateSet, InstanceTypeDefSet,<br/>InstancePriceSet
-        cc-->>-rc: objects
-        rc->>rc: validate ScalingConstraint
-        alt validation fails
-            rc->>cc: set ScalingConstraint.Status.Conditions (Accepted=False)
-            rc-->>crt: return error
-        else validation passes
-            rc->>cc: set ScalingConstraint.Status.Conditions (Accepted=True)
-            rc->>+tc: get scheduling relevant objects
-            note right of tc: Nodes, Pods, PVs, PVCs,<br/>StorageClasses, RuntimeClasses, CSINodes
-            tc-->>-rc: objects
-            rc->>rc: build ClusterSnapshot
-            rc->>rc: build Request (ClusterSnapshot, ScalingConstraint, NodeTemplates, InstanceTypeDefs, InstancePrices, Memento)
-            rc->>+sp: Plan(Request)
+    rc->>+cc: get constraint objects
+    note right of cc: ScalingConstraint, ScalingFeedback,<br/>NodeTemplateSet, InstanceTypeDefSet,<br/>InstancePriceSet
+    cc-->>-rc: objects
+    rc->>rc: validate ScalingConstraint
+    alt validation fails
+        rc->>cc: set ScalingConstraint.Status.Conditions (Accepted=False)
+        rc-->>crt: return error
+    else validation passes
+        rc->>cc: set ScalingConstraint.Status.Conditions (Accepted=True)
+        rc->>+tc: get scheduling relevant objects
+        note right of tc: Nodes, Pods, PVs, PVCs,<br/>StorageClasses, RuntimeClasses, CSINodes
+        tc-->>-rc: objects
+        rc->>rc: build Request (ClusterSnapshot, ScalingConstraint, NodeTemplates, InstanceTypeDefs, InstancePrices, Memento)
+        rc->>+sp: Prepare(ctx, request, batchWindowStart)
+        sp-->>-rc: shouldPlan, preparedRequest, batchWindowStart
+        rc->>rc: save preparedRequest.Memento, update batchWindowStart
+        alt shouldPlan = true
+            rc->>+sp: Plan(ctx, preparedRequest)
             loop deliver results
                 sp-->>rc: Response (ScaleOutPlan, ScaleInPlan, Diagnostics)
             end
             sp-->>-rc: done
-            rc->>rc: form ScalingAdvice (ScaleOutPlan, ScaleInPlan, Diagnostics)
+            rc->>rc: form ScalingAdvice
             rc->>cc: write ScalingAdvice to ctl cluster
             rc->>rc: clear batchWindowStart
             lm->>lm: watch ScalingAdvice, provision/decommission instances
             lm->>cc: write ScalingFeedback to ctl cluster
+            rc-->>crt: RequeueAfter SyncPeriod
+        else shouldPlan = false, batchWindowStart = zero
+            rc-->>crt: RequeueAfter SyncPeriod
+        else shouldPlan = false, batchWindow in progress
+            rc-->>crt: RequeueAfter remaining
         end
     end
 ```
 
-##### When does Operator invoke ScalignPlanner
+##### When does Operator invoke ScalingPlanner
 
-> [!NOTE] Went for Vivek's simplified solution instead of all the un-needed complexity.
+**What triggers `Reconcile`**: any event on a control-cluster or target-cluster object watched by the operator, an explicit `ctrl.Result{RequeueAfter: SyncPeriod}` returned from a prior reconcile, or the `manager.Options.Cache.SyncPeriod` fallback (configurable, default `10s`).
 
-1. The controller runtime is configured to invoke `Reconcile` for unscheduled pod events or explicit short `RequeueAfter`.
-1. In Operator Reconcile:
-    1. Check if `batchWindowStart` is set. If not, set `batchWindowStart = now` and return early: `ctrl.Result{RequeueAfter: batchWindowDuration}`.
-    1. If `remaining = batchWindowDuration - (now - batchWindowStart)` is still positive, return early: `ctrl.Result{RequeueAfter: remaining}`.
-    1. Batch window has elapsed: fetch and validate constraint objects from the control cluster and scheduling-relevant objects from the target cluster, then invoke `ScalingPlanner.Plan(ctx, request)`, proceeding as illustrated in the above figure.
-    1. Clear `batchWindowStart` (whether the planner succeeded or failed) so the window re-arms for the next batch of events.
+**`Reconcile` flow**:
 
+1. Build a `Request` from the shared-informer cache and the latest saved `Memento` (if any).
+2. Invoke `ScalingPlanner.Prepare`:
+    ```
+    shouldPlan, preparedRequest, batchWindowStart = ScalingPlanner.Prepare(ctx, request, batchWindowStart)
+    ```
+    `batchWindowStart` is operator state (a field on the `Reconciler` struct), passed in and returned so `Prepare` remains stateless. The operator always saves `preparedRequest.Memento` after this call regardless of `shouldPlan`.
 
+    `Prepare` decides `shouldPlan` as follows:
+    - **Scale-in path** (bypasses batch window): if any node has crossed its configured underutilization period, return `shouldPlan=true`, `batchWindowStart` unchanged.
+    - **Scale-out path** (batch window applies):
+        - If no unschedulable pods then clear `batchWindowStart` to zero, `shouldPlan=false`.
+        - If unschedulable pods present and `batchWindowStart` is zero, then`batchWindowStart=now`, `shouldPlan=false`.
+            -  if `remaining = batchWindowDuration - (now - batchWindowStart)` > `0`, then  `shouldPlan=false`, `batchWindowStart` unchanged.
+        - If unschedulable pods present and window expired, then `shouldPlan=true`, `batchWindowStart` to zero.
+3. If `shouldPlan=true`: invoke `ScalingPlanner.Plan(ctx, preparedRequest)`, wait for `Response`s, write `ScalingAdvice`, update operator state, return `ctrl.Result{RequeueAfter: SyncPeriod}`.
+4. If `shouldPlan=false`:
+    - If `batchWindowStart` is zero (no pending scale-out): return `ctrl.Result{RequeueAfter: SyncPeriod}`.
+    - If `batchWindowStart` is set (window in progress): return `ctrl.Result{RequeueAfter: remaining}` so the next reconcile fires exactly when the window expires. 
 
 
 #### Operator Lifecycle Manager Interactions
@@ -438,7 +451,7 @@ Simulators are facades that orchestrate one or more `Simulation` runs against sa
 
 ##### SimulatorStrategySingleNodeMultiSim (single-node-multi-sim)
 
-`SimulatorStrategySingleNodeMultiSim` runs one simulation per `(NodePool, NodeTemplate, Zone)` triple. Each simulation scales exactly one virtual node of that triple into a sandbox minkapi view and lets the `kube-scheduler` place pending pods onto it. After all simulations in a priority group complete one pass, the `NodeScorer` picks the winner; that winner's sandbox becomes the base view for the next pass. The group repeats passes until no pods remain unscheduled or no winner is found. The simulator then advances to the next priority group and repeats.
+`SimulatorStrategySingleNodeMultiSim` runs one simulation per `(NodePool, NodeTemplate, Zone)` triplet. Each simulation scales exactly one virtual node of that triplet into a sandbox minkapi view and lets the `kube-scheduler` place pending pods onto it. After all simulations in a priority group complete one pass, the `NodeScorer` picks the winner; that winner's sandbox becomes the base view for the next pass. The group repeats passes until no pods remain unscheduled or no winner is found. The simulator then advances to the next priority group and repeats.
 
 Key concepts:
 
@@ -515,6 +528,11 @@ sequenceDiagram
         sos-->>-sp: ScaleOutPlanResult
     end
 ```
+
+##### SimulatorStrategyMultiNodeSingleSim (multi-node-single-sim)
+
+`SimulatorStrategyMultiNodeSingleSim` represents a simulator strategy in which the `ScaleOutSimulator` runs a single simulation by scaling multiple nodes for all combinations of NodePool, NodeTemplate and AvailabilityZone, ie for all `ScaleOutNodeTemplate`s
+
 
 ## TODO
 
